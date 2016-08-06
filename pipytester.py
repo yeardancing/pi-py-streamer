@@ -14,11 +14,14 @@ while True:
 
     c = raw_input('\nbooj-player>')
 
-    if c[0] not in 'dghlnpqstv':
+    if not c:
+        continue
+
+    if c[0] not in 'dghjlnpqstv':
         print 'Unrecognized Command!'
         continue
 
-    if c[0] in 'dhpt':
+    if c[0] in 'dhjpt':
         responseNeeded = True
 
     q.put(c)

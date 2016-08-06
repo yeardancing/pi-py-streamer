@@ -2,8 +2,6 @@ import os
 import sys
 import threading
 import Queue
-import gobject
-gobject.threads_init ()
 import pygst
 pygst.require ("0.10")
 import gst
@@ -12,6 +10,7 @@ class PiPyStreamer(threading.Thread):
     GET_DURATION    = 'd'
     PLAY            = 'g'
     HELP            = 'h'
+    IS_PLAYING      = 'j'
     LOAD            = 'l'
     STOP            = 'n'
     GET_POSITION    = 'p'
@@ -24,6 +23,7 @@ class PiPyStreamer(threading.Thread):
        d            - get duration
        g            - play
        h            - this help
+       j            - is playing
        l <file>     - load song
        n            - stop
        p            - get position
@@ -37,26 +37,24 @@ class PiPyStreamer(threading.Thread):
         self.q = requestQueue
         self.resp_q = responseQueue
 
-    def onMsg(pl, msg):
-        if msg.type == gst.MESSAGE_ERROR:
-            error, debug = msg.parse_error()
-            print error, debug
+    def loadUri(self, player, uri):
+        player.set_state(gst.STATE_NULL)
+        print "playing:", uri
+        player.set_property('uri', 'file://' + os.path.abspath(uri))
+        player.set_state(gst.STATE_PLAYING)
 
     def run(self):
-        mainloop = gobject.MainLoop()
         pl = gst.element_factory_make("playbin", "player")
-        #context = mainloop.get_context()
-        bus = pl.get_bus()
 
         while True:
-            msg = bus.poll(gst.MESSAGE_STREAM_STATUS, 1.0)
+            msg = pl.get_bus().timed_pop_filtered(1, gst.MESSAGE_EOS)
             if msg:
-                print msg
+                print "End of playback!"
             try:
                 try:
-                    item = self.q.get(True, 2.0)
+                    item = self.q.get(True, 1.0)
                     c = item[0]
-                except Queue.Empty:
+                except:
                     continue
 
                 if c == PiPyStreamer.SEEK:
@@ -68,6 +66,16 @@ class PiPyStreamer(threading.Thread):
 
                 elif c == PiPyStreamer.HELP:
                     self.resp_q.put(PiPyStreamer.help_str)
+                    self.resp_q.task_done()
+
+                elif c == PiPyStreamer.IS_PLAYING:
+                    try:
+                        if pl.get_state()[1] == gst.STATE_PLAYING:
+                            self.resp_q.put(1)
+                        else:
+                            self.resp_q.put(0)
+                    except:
+                        self.resp_q.put("Couldn't get play status")
                     self.resp_q.task_done()
 
                 elif c == PiPyStreamer.QUIT:
@@ -113,10 +121,7 @@ class PiPyStreamer(threading.Thread):
                     pl.set_state(gst.STATE_PLAYING)
 
                 elif c == PiPyStreamer.LOAD:
-                    pl.set_state(gst.STATE_NULL)
-                    print "playing:", item[2:]
-                    pl.set_property('uri', 'file://' + os.path.abspath(item[2:]))
-                    pl.set_state(gst.STATE_PLAYING)
+                    self.loadUri(pl, item[2:])
                     
             except IOError: 
                 print 'IOerror...'
