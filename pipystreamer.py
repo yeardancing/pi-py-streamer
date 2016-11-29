@@ -2,9 +2,10 @@ import os
 import sys
 import threading
 import Queue
-import pygst
-pygst.require ("0.10")
-import gst
+import gi
+gi.require_version('Gst', '1.0')
+from gi.repository import Gst
+Gst.init(None)
 
 class PiPyStreamer(threading.Thread):
     GET_DURATION    = 'd'
@@ -38,18 +39,36 @@ class PiPyStreamer(threading.Thread):
         self.resp_q = responseQueue
 
     def loadUri(self, player, uri):
-        player.set_state(gst.STATE_NULL)
+        player.set_state(Gst.State.NULL)
         print "playing:", uri
         player.set_property('uri', 'file://' + os.path.abspath(uri))
-        player.set_state(gst.STATE_PLAYING)
+        player.set_state(Gst.State.PLAYING)
 
     def run(self):
-        pl = gst.element_factory_make("playbin", "player")
+        pl = Gst.ElementFactory.make('playbin', 'player')
 
         while True:
-            msg = pl.get_bus().timed_pop_filtered(1, gst.MESSAGE_EOS)
-            if msg:
-                print "End of playback!"
+            message = pl.get_bus().timed_pop_filtered(200 * Gst.MSECOND, 
+                    Gst.MessageType.STATE_CHANGED | Gst.MessageType.ERROR | Gst.MessageType.EOS)
+            if message:
+                if message.type == Gst.MessageType.ERROR:
+                    err, debug = message.parse_error()
+                    print("Error received from element %s: %s" % (
+                    message.src.get_name(), err))
+                    print("Debugging information: %s" % debug)
+                    break
+                elif message.type == Gst.MessageType.EOS:
+                    print("End-Of-Stream reached.")
+                    break
+                elif message.type == Gst.MessageType.STATE_CHANGED:
+                    if isinstance(message.src, Gst.Pipeline):
+                        old_state, new_state, pending_state = message.parse_state_changed()
+                        print("Pipeline state changed from %s to %s." %
+                            (old_state.value_nick, new_state.value_nick))
+                else:
+                    print message.type
+                    print("Unexpected message received.")
+
             try:
                 try:
                     item = self.q.get(True, 1.0)
@@ -60,7 +79,7 @@ class PiPyStreamer(threading.Thread):
                 if c == PiPyStreamer.SEEK:
                     try:
                         loc = float(item[2:])
-                        pl.seek_simple(gst.FORMAT_TIME, gst.SEEK_FLAG_FLUSH | gst.SEEK_FLAG_KEY_UNIT, loc * gst.SECOND) 
+                        pl.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT, loc * Gst.SECOND) 
                     except:
                         print "Couldn't seek"
 
@@ -70,7 +89,7 @@ class PiPyStreamer(threading.Thread):
 
                 elif c == PiPyStreamer.IS_PLAYING:
                     try:
-                        if pl.get_state()[1] == gst.STATE_PLAYING:
+                        if pl.get_state(timeout = 50 * Gst.MSECOND)[1] == Gst.State.PLAYING:
                             self.resp_q.put(1)
                         else:
                             self.resp_q.put(0)
@@ -79,22 +98,22 @@ class PiPyStreamer(threading.Thread):
                     self.resp_q.task_done()
 
                 elif c == PiPyStreamer.QUIT:
-                    pl.set_state(gst.STATE_NULL)
+                    pl.set_state(Gst.State.NULL)
                     print 'bye!'
                     return 
 
                 elif c == PiPyStreamer.GET_DURATION:
                     try: 
-                        duration, format = pl.query_duration(gst.FORMAT_TIME)
-                        self.resp_q.put(float(duration) / gst.SECOND)
+                        _, duration = pl.query_duration(Gst.Format.TIME)
+                        self.resp_q.put(float(duration) / Gst.SECOND)
                     except:
                         self.resp_q.put("Couldn't fetch song duration")
                     self.resp_q.task_done()
 
                 elif c == PiPyStreamer.GET_POSITION:
                     try:
-                        position, format = pl.query_position(gst.FORMAT_TIME)
-                        self.resp_q.put(float(position) / gst.SECOND)
+                        _, current = pl.query_position(Gst.Format.TIME)
+                        self.resp_q.put(float(current) / Gst.SECOND)
                     except:
                         self.resp_q.put("Couldn't fetch song position")
                     self.resp_q.task_done()
@@ -115,10 +134,10 @@ class PiPyStreamer(threading.Thread):
                     self.resp_q.task_done()
 
                 elif c == PiPyStreamer.STOP:
-                    pl.set_state(gst.STATE_PAUSED)
+                    pl.set_state(Gst.State.PAUSED)
 
                 elif c == PiPyStreamer.PLAY:
-                    pl.set_state(gst.STATE_PLAYING)
+                    pl.set_state(Gst.State.PLAYING)
 
                 elif c == PiPyStreamer.LOAD:
                     self.loadUri(pl, item[2:])
