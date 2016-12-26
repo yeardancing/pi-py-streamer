@@ -59,6 +59,7 @@ class PiPyStreamer(threading.Thread):
                     break
                 elif message.type == Gst.MessageType.EOS:
                     print("End-Of-Stream reached.")
+                    pl.set_state(Gst.State.NULL)
                     break
                 elif message.type == Gst.MessageType.STATE_CHANGED:
                     if isinstance(message.src, Gst.Pipeline):
